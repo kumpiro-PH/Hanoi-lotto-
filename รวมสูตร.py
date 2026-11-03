@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 from รวมสูตร import (
+from hanoi_formulas import (
     CSV_FILE, 
     initialize_csv, 
     parse_thai_date, 
