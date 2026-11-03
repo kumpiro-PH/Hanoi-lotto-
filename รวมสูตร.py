@@ -1,7 +1,6 @@
 # app.py
 import streamlit as st
 import pandas as pd
-from รวมสูตร import (
 from hanoi_formulas import (
     CSV_FILE, 
     initialize_csv, 
@@ -94,7 +93,6 @@ elif menu == "4. Formula Ranking (จัดอันดับสูตร)":
     
     if st.button("เริ่มคำนวณสถิติย้อนหลัง"):
         with st.spinner("กำลังประมวลผล Backtest..."):
-            # เรียกใช้งานฟังก์ชันเตรียมข้อมูลจากไฟล์รวมสูตร
             df = pd.read_csv(CSV_FILE)
             df["dt"] = df["date"].apply(parse_thai_date)
             df = df.dropna(subset=["dt"]).sort_values(by="dt", ascending=True).reset_index(drop=True)
