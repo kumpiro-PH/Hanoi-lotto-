@@ -1,18 +1,100 @@
-# app.py
+# app.py (ไฟล์เดียวจบ ครบทุกฟังก์ชัน)
+import os
 import streamlit as st
 import pandas as pd
-from hanoi_formulas import (
-    CSV_FILE, 
-    initialize_csv, 
-    parse_thai_date, 
-    get_transformations, 
-    DAILY_NUMBERS
-)
 
-# ตั้งค่าหน้าเว็บ
+# ==================== ตั้งค่าหน้าเว็บ ====================
 st.set_page_config(page_title="Hanoi AI Professional", page_icon="🎯", layout="wide")
 
-# ตรวจสอบและสร้างฐานข้อมูลเริ่มต้น
+# ==================== ชื่อไฟล์ฐานข้อมูลหลัก ====================
+CSV_FILE = "history_hanoi.csv"
+
+# ==================== ชุดเลขประจำวัน 6 ตัวตามสถิติ ====================
+DAILY_NUMBERS = {
+    "Monday": "940627",
+    "Tuesday": "017562",
+    "Wednesday": "394517",
+    "Thursday": "643951",
+    "Friday": "974516",
+    "Saturday": "820739",
+    "Sunday": "470076",
+}
+
+def parse_thai_date(x):
+    """ฟังก์ชันแปลงวันที่พุทธศักราช (DD/MM/YYYY) เป็น ค.ศ. แบบปลอดภัย"""
+    try:
+        parts = str(x).strip().split("/")
+        if len(parts) != 3:
+            return pd.NaT
+        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+        if year < 100:
+            year += 2500
+        return pd.Timestamp(year=year - 543, month=month, day=day)
+    except Exception:
+        return pd.NaT
+
+def initialize_csv():
+    """ตรวจสอบไฟล์ CSV หากยังไม่มีให้สร้างโครงสร้างเริ่มต้น"""
+    if not os.path.exists(CSV_FILE):
+        initial_data = """date,special,first_prize,top_3,bottom_2
+30/09/2569,95242,82585,242,85
+29/09/2569,05651,08389,651,89
+28/09/2569,77115,86908,115,08"""
+        with open(CSV_FILE, "w", encoding="utf-8") as f:
+            f.write(initial_data)
+
+def get_transformations(top_3_str, bottom_2_str="00"):
+    """แปลงเลขฐานและสูตรคำนวณทั้งหมด"""
+    try:
+        clean_t3 = str(top_3_str).split(".")[0].strip().zfill(3)
+        clean_b2 = str(bottom_2_str).split(".")[0].strip().zfill(2)
+    except Exception:
+        clean_t3, clean_b2 = "000", "00"
+
+    digits_t3 = [int(c) for c in clean_t3[-3:]]
+    digits_b2 = [int(c) for c in clean_b2[-2:]]
+    
+    carry_over = set(digits_t3 + digits_b2)
+
+    pm1 = set()
+    for dig in digits_t3 + digits_b2:
+        pm1.add((dig + 1) % 10)
+        pm1.add((dig - 1) % 10)
+
+    sum_t3 = sum(digits_t3) % 10
+    sum_b2 = sum(digits_b2) % 10
+    sum_total = (sum_t3 + sum_b2) % 10
+    sum_formulas = {str(sum_t3), str(sum_b2), str(sum_total)}
+
+    cross_sum_1 = (digits_t3[1] + digits_b2[1]) % 10
+    cross_sum_2 = (digits_t3[2] + digits_b2[0]) % 10
+    cross_formulas = {str(cross_sum_1), str(cross_sum_2)}
+
+    rotations = {
+        f"{digits_t3[1]}{digits_t3[2]}{digits_t3[0]}",
+        f"{digits_t3[2]}{digits_t3[0]}{digits_t3[1]}",
+    }
+    mirror_map = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
+    mirrored = "".join([str(mirror_map[d]) for d in digits_t3])
+    shifted = "".join([str((d + 2) % 10) for d in digits_t3])
+    
+    doubles = {f"{d}{d}" for d in digits_t3}
+    sandwiches = {f"{d1}{d2}{d1}" for d1 in digits_t3 for d2 in digits_t3 if d1 != d2}
+
+    return {
+        "carry_over": carry_over,
+        "pm1": pm1,
+        "sum_formulas": sum_formulas,
+        "cross_formulas": cross_formulas,
+        "rotations": rotations,
+        "mirror": mirrored,
+        "shifted": shifted,
+        "doubles": doubles,
+        "sandwiches": sandwiches
+    }
+
+# ==================== ส่วนแสดงผลหน้าเว็บ Streamlit ====================
+
 initialize_csv()
 
 st.title("🎯 Hanoi AI Professional - ระบบวิเคราะห์หวยฮานอย")
