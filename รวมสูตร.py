@@ -11,15 +11,15 @@ MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 5
 RECENT_WINDOW = 30
 
 DEFAULT_DAILY_NUMBERS = {
-DAILY_NUMBERS = {
-    "Monday": "056787",     # เลขประจำวันจันทร์ (อิงจากสถิติวันจันทร์)
-    "Tuesday": "657872",    # เลขประจำวันอังคาร (อิงจากสถิติวันอังคาร)
-    "Wednesday": "390768",  # เลขประจำวันพุธ (อิงจากสถิติวันพุธ)
-    "Thursday": "897693",   # เลขประจำวันพฤหัสบดี (อิงจากสถิติวันพฤหัสบดี)
-    "Friday": "305687",     # เลขประจำวันศุกร์ (อิงจากสถิติวันศุกร์)
-    "Saturday": "7890123",  # เลขประจำวันเสาร์ (อิงจากสถิติวันเสาร์)
-    "Sunday": "8901234"     # เลขประจำวันอาทิตย์ (อิงจากสถิติวันอาทิตย์)
+    "Monday": "056787",     # เลขประจำวันจันทร์
+    "Tuesday": "657872",    # เลขประจำวันอังคาร
+    "Wednesday": "390768",  # เลขประจำวันพุธ
+    "Thursday": "897693",   # เลขประจำวันพฤหัสบดี
+    "Friday": "305687",     # เลขประจำวันศุกร์
+    "Saturday": "7890123",  # เลขประจำวันเสาร์
+    "Sunday": "8901234"     # เลขประจำวันอาทิตย์
 }
+
 FORMULAS = [
     "Carry Over",
     "±1",
@@ -275,7 +275,7 @@ def dynamic_weights(df):
 def digit_scores(df, next_day):
     if df.empty:
         return {str(i): 0.0 for i in range(10)}, {}, "000000"
-    latest = df.iloc[0] # ใช้แถวแรกสุดเพราะถูก sort ไว้แบบ descending (ล่าสุดอยู่บนสุด)
+    latest = df.iloc[0]
     candidates, daily, trans = formula_candidates(latest["top_3"], latest["bottom_2"], next_day, df)
     weights = dynamic_weights(df)
     scores = {str(i): 0.0 for i in range(10)}
