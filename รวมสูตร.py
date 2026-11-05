@@ -10,6 +10,7 @@ CSV_FILE = "history_hanoi.csv"
 MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 5
 RECENT_WINDOW = 30
 
+# กำหนดเลขประจำวันแบบฟิกซ์ตามที่คุณต้องการ
 DEFAULT_DAILY_NUMBERS = {
     "Monday": "056787",     # เลขประจำวันจันทร์
     "Tuesday": "657872",    # เลขประจำวันอังคาร
@@ -133,19 +134,8 @@ def get_transformations(top_3_str, bottom_2_str="00"):
     }
 
 def daily_number_for_day(day, history=None):
-    base = DEFAULT_DAILY_NUMBERS.get(day, "000000")
-    if history is None or len(history) < MIN_HISTORY_FOR_DYNAMIC_WEIGHT:
-        return base
-    recent = history.tail(min(RECENT_WINDOW, len(history)))
-    freq = Counter()
-    for _, row in recent.iterrows():
-        freq.update(str(row["top_3"]))
-        freq.update(str(row["bottom_2"]))
-    score = {str(i): float(freq[str(i)]) for i in range(10)}
-    for d in base:
-        score[d] += 1.5
-    ordered = sorted(score, key=lambda d: (-score[d], d))
-    return "".join(ordered[:6])
+    # บังคับดึงค่าเลขประจำวันตามที่ตั้งค่าไว้ใน DEFAULT_DAILY_NUMBERS โดยตรง
+    return DEFAULT_DAILY_NUMBERS.get(day, "000000")
 
 def formula_candidates(base_t3, base_b2, next_day, history=None):
     trans = get_transformations(base_t3, base_b2)
@@ -440,5 +430,5 @@ elif "5." in menu:
     df_sorted = df.sort_values("dt").reset_index(drop=True)
     daily_data = []
     for en, th in day_th_map.items():
-        daily_data.append({"วัน": th, "Daily 6-Digit": daily_number_for_day(en, df_sorted)})
+        daily_data.append({"วัน": th, "Daily 6-Digit": DEFAULT_DAILY_NUMBERS.get(en, "")})
     st.dataframe(pd.DataFrame(daily_data), use_container_width=True)
