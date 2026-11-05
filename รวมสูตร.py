@@ -1,26 +1,16 @@
-# app.py - Hanoi AI Professional (All-in-One Streamlit App - Multi-CSV & 3-Way Fusion)
-import os
 import streamlit as st
+import os
+import math
 import pandas as pd
+from collections import Counter, defaultdict
 
-# ==================== ตั้งค่าหน้าเว็บ ====================
-st.set_page_config(page_title="Hanoi AI Professional", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="HANOI AI PROFESSIONAL v2.0", layout="wide")
 
-# ==================== ชื่อไฟล์ฐานข้อมูลหลักและรายวัน ====================
 CSV_FILE = "history_hanoi.csv"
+MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 10
+RECENT_WINDOW = 30
 
-DAY_MAP = {
-    "Monday": "mon",
-    "Tuesday": "tue",
-    "Wednesday": "wed",
-    "Thursday": "thu",
-    "Friday": "fri",
-    "Saturday": "sat",
-    "Sunday": "sun",
-}
-
-# ==================== ชุดเลขประจำวัน 6 ตัวตามสถิติ ====================
-DAILY_NUMBERS = {
+DEFAULT_DAILY_NUMBERS = {
     "Monday": "940627",
     "Tuesday": "017562",
     "Wednesday": "394517",
@@ -30,409 +20,463 @@ DAILY_NUMBERS = {
     "Sunday": "470076",
 }
 
+FORMULAS = [
+    "Carry Over",
+    "±1",
+    "Sum Modulo",
+    "Cross Sum",
+    "Daily 6-Digit",
+    "Rotation",
+    "Mirror",
+    "Shift +2",
+    "Double",
+    "Sandwich",
+]
+
+def zfill_num(value, width):
+    try:
+        if pd.isna(value):
+            return "0" * width
+        s = str(value).strip()
+        if "." in s:
+            s = s.split(".")[0]
+        return s.zfill(width)[-width:]
+    except Exception:
+        return "0" * width
+
 def parse_thai_date(x):
-    """ฟังก์ชันแปลงวันที่พุทธศักราช (DD/MM/YYYY) เป็น ค.ศ. แบบปลอดภัย"""
     try:
         parts = str(x).strip().split("/")
         if len(parts) != 3:
             return pd.NaT
-        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
-        if year > 2400:
+        day, month, year = map(int, parts)
+        if year < 100:
+            year += 2500
+        if year >= 2400:
             year -= 543
-        elif year < 100:
-            year += 2000
         return pd.Timestamp(year=year, month=month, day=day)
     except Exception:
         return pd.NaT
 
-def clean_dataframe(df):
-    """ทำความสะอาดชื่อคอลัมน์รองรับทั้งภาษาอังกฤษและภาษาไทย"""
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["date", "special", "first_prize", "top_3", "bottom_2"])
-    df.columns = df.columns.str.strip()
-    column_mapping = {
-        "วันที่": "date",
-        "รางวัลพิเศษ": "special",
-        "รางวัลที่ 1": "first_prize",
-        "รางวัลที่ 2": "first_prize",
-        "3 ตัวบน": "top_3",
-        "3ตัวบน": "top_3",
-        "2 ตัวล่าง": "bottom_2",
-        "2ตัวล่าง": "bottom_2"
-    }
-    df = df.rename(columns=column_mapping)
+def initialize_csv():
+    if not os.path.exists(CSV_FILE):
+        initial_data = [
+            ["30/09/2569", "95242", "82585", "242", "85"],
+            ["29/09/2569", "05651", "08389", "651", "89"],
+            ["28/09/2569", "77115", "86908", "115", "08"],
+        ]
+        pd.DataFrame(initial_data, columns=[
+            "date", "special", "first_prize", "top_3", "bottom_2"
+        ]).to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
+
+def load_history():
+    if not os.path.exists(CSV_FILE):
+        initialize_csv()
+    df = pd.read_csv(CSV_FILE, dtype=str).fillna("")
+    required = ["date", "special", "first_prize", "top_3", "bottom_2"]
+    for col in required:
+        if col not in df.columns:
+            df[col] = ""
+    df["dt"] = df["date"].apply(parse_thai_date)
+    df = df.dropna(subset=["dt"]).copy()
+    df["top_3"] = df["top_3"].apply(lambda x: zfill_num(x, 3))
+    df["bottom_2"] = df["bottom_2"].apply(lambda x: zfill_num(x, 2))
+    df["weekday_en"] = df["dt"].dt.day_name()
     return df
 
-def load_all_history():
-    """โหลดและรวมข้อมูลประวัติจากทุกไฟล์ CSV (ทั้งไฟล์หลักและไฟล์แยกรายวัน)"""
-    dfs = []
-
-    # 1. อ่านไฟล์หลัก history_hanoi.csv ถ้ามี
-    if os.path.exists(CSV_FILE):
-        try:
-            df_main_file = pd.read_csv(CSV_FILE)
-            dfs.append(clean_dataframe(df_main_file))
-        except Exception:
-            pass
-
-    # 2. อ่านไฟล์แยกตามวัน เช่น history_hanoi_mon.csv
-    for day_en, day_code in DAY_MAP.items():
-        daily_filename = f"history_hanoi_{day_code}.csv"
-        if os.path.exists(daily_filename):
-            try:
-                df_daily = pd.read_csv(daily_filename)
-                dfs.append(clean_dataframe(df_daily))
-            except Exception:
-                pass
-
-    if dfs:
-        df_combined = pd.concat(dfs, ignore_index=True)
-        df_combined = df_combined.dropna(subset=["date"])
-        # ลบแถวที่ซ้ำซ้อนตาม วันที่
-        df_combined = df_combined.drop_duplicates(subset=["date"]).reset_index(drop=True)
-        return df_combined
-    else:
-        return pd.DataFrame(columns=["date", "special", "first_prize", "top_3", "bottom_2"])
-
-def load_specific_day_history(day_en):
-    """โหลดข้อมูลเฉพาะไฟล์ CSV ประจำวันนั้นๆ"""
-    day_code = DAY_MAP.get(day_en, "mon")
-    filename = f"history_hanoi_{day_code}.csv"
-    if os.path.exists(filename):
-        try:
-            df = pd.read_csv(filename)
-            return clean_dataframe(df)
-        except Exception:
-            pass
-    return pd.DataFrame(columns=["date", "special", "first_prize", "top_3", "bottom_2"])
-
-def initialize_csv():
-    """ตรวจสอบไฟล์ CSV หากยังไม่มีไฟล์ใดๆ ให้สร้างโครงสร้างเริ่มต้น"""
-    has_any_file = os.path.exists(CSV_FILE) or any(
-        os.path.exists(f"history_hanoi_{code}.csv") for code in DAY_MAP.values()
-    )
-
-    if not has_any_file:
-        initial_data = """date,special,first_prize,top_3,bottom_2
-30/09/2569,95242,82585,242,85
-29/09/2569,05651,08389,651,89
-28/09/2569,77115,86908,115,08"""
-        with open(CSV_FILE, "w", encoding="utf-8") as f:
-            f.write(initial_data)
+def save_history(df):
+    out = df.copy()
+    for col in ["dt", "weekday_en"]:
+        if col in out.columns:
+            out = out.drop(columns=[col])
+    out.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
 
 def get_transformations(top_3_str, bottom_2_str="00"):
-    """แปลงเลขฐานและสูตรคำนวณทั้งหมด"""
-    try:
-        clean_t3 = str(top_3_str).split(".")[0].strip().zfill(3)
-        clean_b2 = str(bottom_2_str).split(".")[0].strip().zfill(2)
-    except Exception:
-        clean_t3, clean_b2 = "000", "00"
+    t3 = zfill_num(top_3_str, 3)
+    b2 = zfill_num(bottom_2_str, 2)
+    a, b, c = [int(x) for x in t3]
+    d, e = [int(x) for x in b2]
 
-    digits_t3 = [int(c) for c in clean_t3[-3:]]
-    digits_b2 = [int(c) for c in clean_b2[-2:]]
+    digits = [a, b, c, d, e]
+    carry = {str(x) for x in digits}
+    pm1 = {str((x + delta) % 10) for x in digits for delta in (-1, 1)}
 
-    carry_over = set(digits_t3 + digits_b2)
-
-    pm1 = set()
-    for dig in digits_t3 + digits_b2:
-        pm1.add((dig + 1) % 10)
-        pm1.add((dig - 1) % 10)
-
-    sum_t3 = sum(digits_t3) % 10
-    sum_b2 = sum(digits_b2) % 10
+    sum_t3 = (a + b + c) % 10
+    sum_b2 = (d + e) % 10
     sum_total = (sum_t3 + sum_b2) % 10
     sum_formulas = {str(sum_t3), str(sum_b2), str(sum_total)}
 
-    cross_sum_1 = (digits_t3[1] + digits_b2[1]) % 10
-    cross_sum_2 = (digits_t3[2] + digits_b2[0]) % 10
-    cross_formulas = {str(cross_sum_1), str(cross_sum_2)}
-
-    rotations = {
-        f"{digits_t3[1]}{digits_t3[2]}{digits_t3[0]}",
-        f"{digits_t3[2]}{digits_t3[0]}{digits_t3[1]}",
+    cross_formulas = {
+        str((b + e) % 10),
+        str((c + d) % 10),
+        str((a + d) % 10),
+        str((a + e) % 10),
     }
+
+    rotations = {t3[1:] + t3[0], t3[2] + t3[:2]}
     mirror_map = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
-    mirrored = "".join([str(mirror_map[d]) for d in digits_t3])
-    shifted = "".join([str((d + 2) % 10) for d in digits_t3])
-
-    doubles = {f"{d}{d}" for d in digits_t3}
-    sandwiches = {
-        f"{d1}{d2}{d1}" for d1 in digits_t3 for d2 in digits_t3 if d1 != d2
-    }
+    mirror = "".join(str(mirror_map[int(x)]) for x in t3)
+    shifted = "".join(str((int(x) + 2) % 10) for x in t3)
+    doubles = {x * 2 for x in t3}
+    sandwiches = {a_str + b_str + a_str for a_str in t3 for b_str in t3 if a_str != b_str}
 
     return {
-        "carry_over": carry_over,
+        "carry_over": carry,
         "pm1": pm1,
         "sum_formulas": sum_formulas,
         "cross_formulas": cross_formulas,
         "rotations": rotations,
-        "mirror": mirrored,
+        "mirror": mirror,
         "shifted": shifted,
         "doubles": doubles,
         "sandwiches": sandwiches,
     }
 
+def daily_number_for_day(day, history=None):
+    base = DEFAULT_DAILY_NUMBERS.get(day, "000000")
+    if history is None or len(history) < MIN_HISTORY_FOR_DYNAMIC_WEIGHT:
+        return base
+    recent = history.tail(min(RECENT_WINDOW, len(history)))
+    freq = Counter()
+    for _, row in recent.iterrows():
+        freq.update(str(row["top_3"]))
+        freq.update(str(row["bottom_2"]))
+    score = {str(i): float(freq[str(i)]) for i in range(10)}
+    for d in base:
+        score[d] += 1.5
+    ordered = sorted(score, key=lambda d: (-score[d], d))
+    return "".join(ordered[:6])
 
-# ==================== ส่วนแสดงผลหน้าเว็บ Streamlit ====================
+def formula_candidates(base_t3, base_b2, next_day, history=None):
+    trans = get_transformations(base_t3, base_b2)
+    daily = daily_number_for_day(next_day, history)
+    candidates = defaultdict(set)
+    candidates["Carry Over"].update(trans["carry_over"])
+    candidates["±1"].update(trans["pm1"])
+    candidates["Sum Modulo"].update(trans["sum_formulas"])
+    candidates["Cross Sum"].update(trans["cross_formulas"])
+    candidates["Daily 6-Digit"].update(daily)
+    candidates["Rotation"].update(set("".join(trans["rotations"])))
+    candidates["Mirror"].update(trans["mirror"])
+    candidates["Shift +2"].update(trans["shifted"])
+    candidates["Double"].update(set("".join(trans["doubles"])))
+    candidates["Sandwich"].update(set("".join(trans["sandwiches"])))
+    return candidates, daily, trans
 
+def evaluate_formula(formula, trans, daily, actual_t3, actual_b2):
+    t3 = zfill_num(actual_t3, 3)
+    b2 = zfill_num(actual_b2, 2)
+    if formula == "Carry Over":
+        digits = trans["carry_over"]
+        return int(any(d in t3 for d in digits)), int(any(d in b2 for d in digits))
+    if formula == "±1":
+        digits = trans["pm1"]
+        return int(any(d in t3 for d in digits)), int(any(d in b2 for d in digits))
+    if formula == "Sum Modulo":
+        digits = trans["sum_formulas"]
+        return int(any(d in t3 for d in digits)), int(any(d in b2 for d in digits))
+    if formula == "Cross Sum":
+        digits = trans["cross_formulas"]
+        return int(any(d in t3 for d in digits)), int(any(d in b2 for d in digits))
+    if formula == "Daily 6-Digit":
+        return int(any(d in t3 for d in daily)), int(any(d in b2 for d in daily))
+    if formula == "Rotation":
+        rots = trans["rotations"]
+        return int(any(r == t3 for r in rots)), int(any(set(b2).issubset(set(r)) for r in rots))
+    if formula == "Mirror":
+        return int(any(d in t3 for d in trans["mirror"])), int(any(d in b2 for d in trans["mirror"]))
+    if formula == "Shift +2":
+        return int(any(d in t3 for d in trans["shifted"])), int(any(d in b2 for d in trans["shifted"]))
+    if formula == "Double":
+        return int(any(t3[i] == t3[i + 1] for i in range(2))), int(b2[0] == b2[1])
+    if formula == "Sandwich":
+        return int(t3[0] == t3[2] or t3[0] == t3[1] or t3[1] == t3[2]), 0
+    return 0, 0
+
+def exact_pattern_score(formula, trans, daily, actual_t3, actual_b2):
+    t3 = zfill_num(actual_t3, 3)
+    b2 = zfill_num(actual_b2, 2)
+    if formula == "Rotation":
+        if t3 in trans["rotations"]:
+            return 1.0, 1.0
+    if formula == "Mirror":
+        return float(t3 == trans["mirror"]), float(b2 == trans["mirror"][-2:])
+    if formula == "Shift +2":
+        return float(t3 == trans["shifted"]), float(b2 == trans["shifted"][-2:])
+    if formula == "Daily 6-Digit":
+        return len(set(t3) & set(daily)) / 3.0, len(set(b2) & set(daily)) / 2.0
+    return 0.0, 0.0
+
+def backtest_dataframe(df):
+    if len(df) < 2:
+        return pd.DataFrame()
+    rows = []
+    for i in range(1, len(df)):
+        prev = df.iloc[i - 1]
+        actual = df.iloc[i]
+        day = actual["weekday_en"]
+        daily = daily_number_for_day(day, df.iloc[:i])
+        trans = get_transformations(prev["top_3"], prev["bottom_2"])
+        for formula in FORMULAS:
+            hit3, hit2 = evaluate_formula(formula, trans, daily, actual["top_3"], actual["bottom_2"])
+            exact3, exact2 = exact_pattern_score(formula, trans, daily, actual["top_3"], actual["bottom_2"])
+            rows.append({
+                "date": actual["date"],
+                "weekday": day,
+                "formula": formula,
+                "hit_3d": hit3,
+                "hit_2d": hit2,
+                "exact_3d": exact3,
+                "exact_2d": exact2,
+            })
+    return pd.DataFrame(rows)
+
+def formula_ranking(df):
+    bt = backtest_dataframe(df)
+    if bt.empty:
+        return pd.DataFrame()
+    result = []
+    for formula in FORMULAS:
+        x = bt[bt["formula"] == formula]
+        n = len(x)
+        if n == 0:
+            continue
+        hit3 = x["hit_3d"].sum()
+        hit2 = x["hit_2d"].sum()
+        avg_exact3 = x["exact_3d"].mean()
+        avg_exact2 = x["exact_2d"].mean()
+        composite = (
+            0.40 * (hit3 / n) +
+            0.35 * (hit2 / n) +
+            0.15 * avg_exact3 +
+            0.10 * avg_exact2
+        ) * 100
+        result.append({
+            "Formula": formula,
+            "N": n,
+            "3D Hit%": round(hit3 / n * 100, 1),
+            "2D Hit%": round(hit2 / n * 100, 1),
+            "3D Exact%": round(avg_exact3 * 100, 1),
+            "2D Exact%": round(avg_exact2 * 100, 1),
+            "Composite": round(composite, 1),
+        })
+    return pd.DataFrame(result).sort_values("Composite", ascending=False).reset_index(drop=True)
+
+def dynamic_weights(df):
+    ranking = formula_ranking(df)
+    if ranking.empty:
+        return {f: 1.0 for f in FORMULAS}
+    weights = {}
+    for _, row in ranking.iterrows():
+        w = 0.5 + row["Composite"] / 50.0
+        weights[row["Formula"]] = max(0.5, min(3.0, w))
+    return weights
+
+def digit_scores(df, next_day):
+    if df.empty:
+        return {str(i): 0.0 for i in range(10)}, {}, "000000"
+    latest = df.iloc[-1]
+    candidates, daily, trans = formula_candidates(latest["top_3"], latest["bottom_2"], next_day, df)
+    weights = dynamic_weights(df)
+    scores = {str(i): 0.0 for i in range(10)}
+    for formula in FORMULAS:
+        w = weights.get(formula, 1.0)
+        for digit in candidates[formula]:
+            scores[str(digit)] += w
+    recent = df.tail(min(20, len(df)))
+    freq = Counter()
+    for _, row in recent.iterrows():
+        freq.update(row["top_3"])
+        freq.update(row["bottom_2"])
+    for d, n in freq.items():
+        scores[d] += min(1.0, n / max(10, len(recent) * 3))
+    return scores, weights, daily
+
+def generate_prediction(df, next_day):
+    if df.empty:
+        return None
+    latest = df.iloc[-1]
+    scores, weights, daily = digit_scores(df, next_day)
+    ordered = sorted(scores, key=lambda d: (-scores[d], d))
+    den = ordered[0]
+    rong = ordered[1:4]
+    kan = ordered[4:7]
+
+    pairs = []
+    for r in rong:
+        pairs.extend([den + r, r + den])
+    pairs = list(dict.fromkeys(pairs))
+
+    top4 = ordered[:4]
+    triples = []
+    for a in top4:
+        for b in top4:
+            for c in top4:
+                if len({a, b, c}) >= 2:
+                    triples.append(a + b + c)
+    triples = sorted(set(triples), key=lambda x: -(scores[x[0]] + scores[x[1]] + scores[x[2]]))[:12]
+
+    doubles = [d + d for d in ordered[:4]]
+    sandwiches = [a + b + a for a in ordered[:4] for b in ordered[:4] if a != b]
+    sandwiches = sandwiches[:8]
+
+    return {
+        "latest": latest,
+        "daily": daily,
+        "scores": scores,
+        "ordered": ordered,
+        "den": den,
+        "rong": rong,
+        "kan": kan,
+        "pairs": pairs,
+        "triples": triples,
+        "doubles": doubles,
+        "sandwiches": sandwiches,
+        "weights": weights,
+    }
+
+# --- STREAMLIT UI ---
 initialize_csv()
+st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
+st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอยด้วย AI พร้อมระบบ Dynamic Backtest & Formula Ranking")
 
-st.title("🎯 Hanoi AI Professional - ระบบวิเคราะห์หวยฮานอย (3-Way Fusion)")
-st.write("ระบบวิเคราะห์สถิติและทำนายแนวทางหวยฮานอยด้วย Python และ Streamlit")
+menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้งาน", [
+    "1. ทำนายผลล่วงหน้า (Forward Prediction)",
+    "2. อัปเดตผลรางวัล",
+    "3. ตรวจสอบประวัติ (History)",
+    "4. จัดอันดับสูตร / Backtest",
+    "5. Backtest รายละเอียด",
+    "6. จัดการข้อมูล (ลบงวดล่าสุด)",
+    "7. เลขประจำวัน (Daily Numbers)"
+])
 
-# เมนูด้านข้าง (Sidebar)
-menu = st.sidebar.selectbox(
-    "เลือกเมนูการใช้งาน",
-    [
-        "1. อัปเดตผลรางวัล",
-        "2. แสดงประวัติ (History)",
-        "3. ลบข้อมืองวดล่าสุด",
-        "4. Formula Ranking (จัดอันดับสูตร)",
-        "5. Forward Prediction (ทำนายงวดถัดไป)",
-    ],
-)
+df = load_history().sort_values("dt", ascending=False).reset_index(drop=True)
 
-# โหลดข้อมูล CSV (รวมไฟล์หลัก + ไฟล์รายวัน)
-df_main = load_all_history()
+if "1." in menu:
+    st.header("🎯 ทำนายผลล่วงหน้า (Forward Prediction)")
+    day_map = {
+        "วันจันทร์": "Monday",
+        "วันอังคาร": "Tuesday",
+        "วันพุธ": "Wednesday",
+        "วันพฤหัสบดี": "Thursday",
+        "วันศุกร์": "Friday",
+        "วันเสาร์": "Saturday",
+        "วันอาทิตย์": "Sunday"
+    }
+    selected_day_th = st.selectbox("เลือกวันสำหรับงวดถัดไป", list(day_map.keys()))
+    next_day = day_map[selected_day_th]
 
-# เมนูที่ 1: อัปเดตผลรางวัล
-if menu == "1. อัปเดตผลรางวัล":
-    st.header("📝 อัปเดตผลรางวัลหวยฮานอยใหม่")
+    if df.empty:
+        st.warning("⚠️ ยังไม่มีข้อมูลในระบบ กรุณาเพิ่มข้อมูลงวดก่อนหน้าก่อน")
+    else:
+        p = generate_prediction(df, next_day)
+        latest = p["latest"]
 
+        st.info(f"📌 ข้อมูลฐานล่าสุด: งวดวันที่ **{latest['date']}** | 3 ตัวบน: **{latest['top_3']}** | 2 ตัวล่าง: **{latest['bottom_2']}**")
+        st.write(f"📅 Daily 6-Digit สำหรับ {selected_day_th}: `{p['daily']}`")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="🎯 เลขเด่น (Top Pick)", value=p["den"], delta=f"Score: {p['scores'][p['den']]:.2f}")
+        with col2:
+            st.metric(label="🥈 เลขรอง", value=" - ".join(p["rong"]))
+        with col3:
+            st.metric(label="🥉 เลขกัน", value=" - ".join(p["kan"]))
+
+        st.subheader("💡 แนวทางตัวเลขจัดชุด")
+        st.markdown(f"**2D เน้นไป-กลับ:** `{', '.join(p['pairs'])}`")
+        st.markdown(f"**3D ชุด AI:** `{', '.join(p['triples'][:10])}`")
+        st.markdown(f"**เบิ้ล:** `{', '.join(p['doubles'])}`")
+        st.markdown(f"**หาม:** `{', '.join(p['sandwiches'])}`")
+
+        with st.expander("📊 ดูน้ำหนักสูตร Dynamic Formula Weight ในงวดนี้"):
+            w_df = pd.DataFrame(list(p["weights"].items()), columns=["Formula", "Weight"]).sort_values("Weight", ascending=False)
+            st.dataframe(w_df, use_container_width=True)
+
+elif "2." in menu:
+    st.header("📝 อัปเดตผลรางวัลหวยฮานอย")
     with st.form("update_form"):
-        date_str = st.text_input("ใส่วันที่ (DD/MM/YYYY เช่น 06/10/2569)")
+        date_str = st.text_input("ใส่วันที่ (DD/MM/YYYY พ.ศ., เช่น 06/10/2569)")
         special = st.text_input("รางวัลพิเศษ (5 หลัก)")
         first_prize = st.text_input("รางวัลที่ 1 (5 หลัก)")
         top_3 = st.text_input("เลข 3 ตัวบน (3 หลัก)")
         bottom_2 = st.text_input("เลข 2 ตัวล่าง (2 หลัก)")
+        submitted = st.form_submit_button("💾 บันทึกผลรางวัล")
 
-        submitted = st.form_submit_button("บันทึกผลรางวัล")
         if submitted:
-            if date_str and top_3 and bottom_2:
-                dt_obj = parse_thai_date(date_str)
-                if pd.notna(dt_obj):
-                    day_en = dt_obj.day_name()
-                    day_code = DAY_MAP.get(day_en, "mon")
-                    daily_filename = f"history_hanoi_{day_code}.csv"
-
-                    new_row = pd.DataFrame([{
-                        "date": date_str,
-                        "special": special,
-                        "first_prize": first_prize,
-                        "top_3": top_3,
-                        "bottom_2": bottom_2,
-                    }])
-
-                    # 1. บันทึกลงไฟล์หลัก history_hanoi.csv
-                    updated_main = pd.concat([new_row, df_main], ignore_index=True)
-                    updated_main = updated_main.drop_duplicates(subset=["date"]).reset_index(drop=True)
-                    updated_main.to_csv(CSV_FILE, index=False)
-
-                    # 2. บันทึกลงไฟล์แยกรายวัน (เช่น history_hanoi_thu.csv)
-                    df_day_existing = load_specific_day_history(day_en)
-                    updated_day = pd.concat([new_row, df_day_existing], ignore_index=True)
-                    updated_day = updated_day.drop_duplicates(subset=["date"]).reset_index(drop=True)
-                    updated_day.to_csv(daily_filename, index=False)
-
-                    st.success(f"✅ บันทึกผลรางวัลลงในไฟล์หลักและไฟล์ประจำวัน **{day_en}** (`{daily_filename}`) เรียบร้อยแล้ว!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ รูปแบบวันที่ไม่ถูกต้อง กรุณาใส่ในรูปแบบ DD/MM/YYYY")
+            if not date_str or not top_3 or not bottom_2:
+                st.error("⚠️ กรุณากรอกวันที่ 3 ตัวบน และ 2 ตัวล่างให้ครบถ้วน")
             else:
-                st.warning("⚠️ กรุณากรอกข้อมูลวันที่ 3 ตัวบน และ 2 ตัวล่างให้ครบถ้วน")
+                new_row = pd.DataFrame([{
+                    "date": date_str,
+                    "special": special,
+                    "first_prize": first_prize,
+                    "top_3": zfill_num(top_3, 3),
+                    "bottom_2": zfill_num(bottom_2, 2),
+                }])
+                new_row["dt"] = new_row["date"].apply(parse_thai_date)
+                new_row["weekday_en"] = new_row["dt"].dt.day_name()
 
-# เมนูที่ 2: แสดงประวัติทั้งหมด
-elif menu == "2. แสดงประวัติ (History)":
-    st.header("📊 ประวัติผลรางวัลหวยฮานอยย้อนหลังทั้งหมด")
-    if not df_main.empty:
-        st.dataframe(df_main, use_container_width=True)
+                raw = df.drop(columns=["dt", "weekday_en"], errors="ignore")
+                raw = pd.concat([new_row.drop(columns=["dt", "weekday_en"]), raw], ignore_index=True)
+                raw = raw.drop_duplicates(subset=["date"], keep="first")
+                raw["dt"] = raw["date"].apply(parse_thai_date)
+                raw = raw.sort_values("dt", ascending=False)
+                save_history(raw)
+                st.success("✅ บันทึกผลรางวัลใหม่สำเร็จ! กรุณารีเฟรชหน้าจอหรือเลือกเมนูอื่น")
+
+elif "3." in menu:
+    st.header("📜 ประวัติผลรางวัลทั้งหมด (History)")
+    st.write(f"จำนวนข้อมูลทั้งหมด: **{len(df)}** งวด")
+    cols = ["date", "special", "first_prize", "top_3", "bottom_2", "weekday_en"]
+    st.dataframe(df[cols], use_container_width=True)
+
+elif "4." in menu:
+    st.header("📈 การจัดอันดับสูตร / Backtest")
+    df_sorted = df.sort_values("dt").reset_index(drop=True)
+    if len(df_sorted) < 2:
+        st.warning("⚠️ ข้อมูลไม่เพียงพอ ต้องมีอย่างน้อย 2 งวดจึงจะสามารถรัน Backtest ได้")
     else:
-        st.info("ยังไม่มีข้อมูลในระบบ")
+        ranking = formula_ranking(df_sorted)
+        st.dataframe(ranking, use_container_width=True)
+        st.info("💡 **หมายเหตุ:** Hit% คือการมีเลขจากสูตรอยู่ในผลจริง; Exact% เป็นคะแนนความตรงของ pattern ไม่ใช่การรับประกันถูกรางวัล")
 
-# เมนูที่ 3: ลบข้อมืองวดล่าสุด
-elif menu == "3. ลบข้อมืองวดล่าสุด":
-    st.header("🗑️ ลบข้อมูลผลรางวัล (งวดล่าสุด)")
-    if not df_main.empty:
-        st.write("ข้อมืองวดล่าสุดด้านบนสุดที่จะถูกลบ:")
-        st.dataframe(df_main.head(1), use_container_width=True)
-
-        if st.button("ยืนยันการลบงวดล่าสุด"):
-            if len(df_main) > 0:
-                df_main = df_main.iloc[1:].reset_index(drop=True)
-                df_main.to_csv(CSV_FILE, index=False)
-                st.success("✅ ลบงวดล่าสุดเรียบร้อยแล้ว")
-                st.rerun()
+elif "5." in menu:
+    st.header("🔍 Backtest รายละเอียดย้อนหลัง")
+    df_sorted = df.sort_values("dt").reset_index(drop=True)
+    bt = backtest_dataframe(df_sorted)
+    if bt.empty:
+        st.warning("⚠️ ข้อมูลไม่เพียงพอ")
     else:
-        st.info("ไม่มีข้อมูลให้ลบ")
+        recent = bt.tail(len(FORMULAS) * min(15, max(1, len(df_sorted) - 1)))
+        st.dataframe(recent, use_container_width=True)
 
-# เมนูที่ 4: จัดอันดับสูตร
-elif menu == "4. Formula Ranking (จัดอันดับสูตร)":
-    st.header("🏆 จัดอันดับความแม่นยำของสูตร (Formula Ranking)")
+elif "6." in menu:
+    st.header("🗑️ ลบข้อมูลงวดล่าสุด")
+    st.dataframe(df.head(5)[["date", "top_3", "bottom_2", "weekday_en"]], use_container_width=True)
+    if st.button("❌ ยืนยันลบงวดล่าสุด"):
+        if len(df) > 0:
+            df_updated = df.iloc[1:].copy()
+            save_history(df_updated)
+            st.success("✅ ลบงวดล่าสุดเรียบร้อยแล้ว")
+            st.rerun()
+        else:
+            st.warning("⚠️ ไม่พบข้อมูลให้ลบ")
 
-    if st.button("เริ่มคำนวณสถิติย้อนหลัง"):
-        with st.spinner("กำลังประมวลผล Backtest..."):
-            df = df_main.copy()
-            df["dt"] = df["date"].apply(parse_thai_date)
-            df = (
-                df.dropna(subset=["dt"])
-                .sort_values(by="dt", ascending=True)
-                .reset_index(drop=True)
-            )
-            df["weekday_en"] = df["dt"].dt.day_name()
-
-            total = len(df) - 1
-            if total <= 0:
-                st.warning("⚠️ ข้อมูลไม่เพียงพอสำหรับการคำนวณย้อนหลัง")
-            else:
-                scores = {
-                    "Carry Over (ดึงเลขเก่า)": 0,
-                    "±1 (วิ่ง/รูด)": 0,
-                    "Sum Modulo (ผลรวม)": 0,
-                    "Cross Sum (สูตรไขว้)": 0,
-                    "Daily 6-Digit": 0,
-                    "Rotation (โต๊ด)": 0,
-                    "Mirror (กระจก)": 0,
-                    "Shift (+2)": 0,
-                    "Double (เบิ้ล)": 0,
-                    "Sandwich (หาม)": 0,
-                }
-
-                for i in range(1, len(df)):
-                    prev = df.iloc[i - 1]
-                    row = df.iloc[i]
-                    t3 = str(row["top_3"]).zfill(3)
-                    b2 = str(row["bottom_2"]).zfill(2)
-                    base_t3 = str(prev["top_3"]).zfill(3)
-                    base_b2 = str(prev["bottom_2"]).zfill(2)
-                    daily_6 = DAILY_NUMBERS.get(row["weekday_en"], "000000")
-
-                    trans = get_transformations(base_t3, base_b2)
-
-                    if any(str(d) in t3 or str(d) in b2 for d in trans["carry_over"]):
-                        scores["Carry Over (ดึงเลขเก่า)"] += 1
-                    if any(str(d) in t3 or str(d) in b2 for d in trans["pm1"]):
-                        scores["±1 (วิ่ง/รูด)"] += 1
-                    if any(str(d) in t3 or str(d) in b2 for d in trans["sum_formulas"]):
-                        scores["Sum Modulo (ผลรวม)"] += 1
-                    if any(str(d) in t3 or str(d) in b2 for d in trans["cross_formulas"]):
-                        scores["Cross Sum (สูตรไขว้)"] += 1
-                    if any(c in t3 or c in b2 for c in daily_6):
-                        scores["Daily 6-Digit"] += 1
-                    if any(rot in t3 for rot in trans["rotations"]) or any(
-                        any(c in b2 for c in rot) for rot in trans["rotations"]
-                    ):
-                        scores["Rotation (โต๊ด)"] += 1
-                    if any(c in t3 or c in b2 for c in trans["mirror"]):
-                        scores["Mirror (กระจก)"] += 1
-                    if any(c in t3 or c in b2 for c in trans["shifted"]):
-                        scores["Shift (+2)"] += 1
-                    if any(dbl in t3 or dbl in b2 for dbl in trans["doubles"]):
-                        scores["Double (เบิ้ล)"] += 1
-                    if any(snd in t3 for snd in trans["sandwiches"]):
-                        scores["Sandwich (หาม)"] += 1
-
-                ranked = sorted(
-                    scores.items(), key=lambda x: x[1], reverse=True
-                )
-
-                result_data = []
-                for rank, (formula, score) in enumerate(ranked, 1):
-                    percentage = (score / total) * 100
-                    result_data.append(
-                        {
-                            "อันดับ": rank,
-                            "ชื่อสูตร": formula,
-                            "คะแนนที่ถูก": f"{score}/{total}",
-                            "ความแม่นยำ (%)": f"{percentage:.1f}%",
-                        }
-                    )
-
-                st.table(pd.DataFrame(result_data))
-
-# เมนูที่ 5: ทำนายงวดถัดไป (ระบบผสาน 3 ส่วน: history_hanoi.csv + history_hanoi_{day}.csv + เลขประจำวัน)
-elif menu == "5. Forward Prediction (ทำนายงวดถัดไป)":
-    st.header("🔮 Forward Prediction (คำนวณผสาน 3 แหล่งข้อมูล)")
-
-    if not df_main.empty:
-        day_selected = st.selectbox(
-            "เลือกวันของงวดถัดไป",
-            [
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ],
-        )
-
-        # 1. ข้อมืองวดรวมล่าสุดจาก history_hanoi.csv
-        latest_all = df_main.iloc[0]
-
-        # 2. ข้อมืองวดล่าสุดเฉพาะของวันนั้นๆ (เช่น history_hanoi_thu.csv)
-        df_day_specific = load_specific_day_history(day_selected)
-        latest_day = df_day_specific.iloc[0] if not df_day_specific.empty else latest_all
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.info(f"📊 **งวดรวมล่าสุด (`history_hanoi.csv`)**\n\nวันที่: **{latest_all.get('date', '-')}**\n\n3 ตัวบน: `{latest_all.get('top_3', '-')}` | 2 ตัวล่าง: `{latest_all.get('bottom_2', '-')}`")
-        with col_b:
-            st.success(f"📌 **งวดประจำวัน {day_selected} ล่าสุด**\n\nวันที่: **{latest_day.get('date', '-')}**\n\n3 ตัวบน: `{latest_day.get('top_3', '-')}` | 2 ตัวล่าง: `{latest_day.get('bottom_2', '-')}`")
-
-        # 3. เลขประจำวัน 6 ตัวตามสถิติ
-        daily_6 = DAILY_NUMBERS.get(day_selected, "000000")
-        st.write(f"🎯 **ชุดเลขประจำวัน ({day_selected}):** `{daily_6}`")
-
-        if st.button("🚀 ประมวลผลทำนายเลข (ผสาน 3 ส่วน)"):
-            if day_selected == "Saturday":
-                st.warning("⚠️ [AI WARNING] วันเสาร์มีสถิติการออก 'เลขเบิ้ล' และ 'เลขหาม' สูงมาก แนะนำให้ติดชุดกันไว้เสมอ!")
-
-            # แปลงสูตรจากงวดรวมล่าสุด
-            trans_all = get_transformations(latest_all.get('top_3', '000'), latest_all.get('bottom_2', '00'))
-            # แปลงสูตรจากงวดประจำวันล่าสุด
-            trans_day = get_transformations(latest_day.get('top_3', '000'), latest_day.get('bottom_2', '00'))
-
-            digit_scores = {str(i): 0.0 for i in range(10)}
-
-            # --- น้ำหนักส่วนที่ 1: เลขประจำวัน 6 ตัว (+2.0 แต้ม) ---
-            for d in daily_6:
-                digit_scores[d] += 2.0
-
-            # --- น้ำหนักส่วนที่ 2: จากผลรวมล่าสุด (+1.5 แต้ม) ---
-            for d in trans_all['carry_over']: digit_scores[str(d)] += 1.5
-            for d in trans_all['pm1']: digit_scores[str(d)] += 1.2
-            for d in trans_all['sum_formulas']: digit_scores[d] += 1.2
-            for d in trans_all['cross_formulas']: digit_scores[str(d)] += 1.0
-
-            # --- น้ำหนักส่วนที่ 3: จากผลรายวันล่าสุด (+1.5 แต้ม) ---
-            for d in trans_day['carry_over']: digit_scores[str(d)] += 1.5
-            for d in trans_day['pm1']: digit_scores[str(d)] += 1.2
-            for d in trans_day['sum_formulas']: digit_scores[d] += 1.2
-            for d in trans_day['cross_formulas']: digit_scores[str(d)] += 1.0
-
-            sorted_digits = sorted(
-                digit_scores.keys(), key=lambda k: digit_scores[k], reverse=True
-            )
-            den = sorted_digits[0]
-            rong_list = sorted_digits[1:4]
-            gun_list = sorted_digits[4:7]
-
-            st.markdown("---")
-            st.success(f"🎯 **สรุปแนวทางเลขเด่นทำนายงวดถัดไป ({day_selected})**")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("เด่น", den, f"{digit_scores[den]:.1f} แต้ม")
-            col2.metric("รอง", " - ".join(rong_list))
-            col3.metric("กัน", " - ".join(gun_list))
-
-            suggested_2d = [f"{den}{r}" for r in rong_list] + [
-                f"{r}{den}" for r in rong_list
-            ]
-            suggested_3d = [f"{den}{rong_list[0]}{rong_list[1]}"]
-            suggested_double = [f"{den}{den}", f"{rong_list[0]}{rong_list[0]}"]
-
-            st.write(f"• **ชุด 2 ตัวเน้นๆ (ไป-กลับ) :** {', '.join(suggested_2d)}")
-            st.write(f"• **ชุด 3 ตัวบนแนะนำ        :** {', '.join(suggested_3d)}")
-            st.write(f"• **ชุด 2 ตัวเบิ้ล (แนะนำ)    :** {', '.join(suggested_double)}")
-    else:
-        st.info("ยังไม่มีข้อมูลในระบบ กรุณาอัปเพิ่มในเมนูที่ 1 ก่อน")
+elif "7." in menu:
+    st.header("📅 เลขประจำวัน (Daily Numbers)")
+    df_sorted = df.sort_values("dt").reset_index(drop=True)
+    days_th = {
+        "Monday": "วันจันทร์",
+        "Tuesday": "วันอังคาร",
+        "Wednesday": "วันพุธ",
+        "Thursday": "วันพฤหัสบดี",
+        "Friday": "วันศุกร์",
+        "Saturday": "วันเสาร์",
+        "Sunday": "วันอาทิตย์"
+    }
+    daily_data = []
+    for en, th in days_th.items():
+        daily_data.append({"วัน": th, "Daily 6-Digit": daily_number_for_day(en, df_sorted)})
+    st.dataframe(pd.DataFrame(daily_data), use_container_width=True)
+    st.info("💡 เมื่อมี History ตั้งแต่ 10 งวดขึ้นไป ระบบจะสร้าง Daily 6-Digit แบบ Dynamic จากสถิติจริง")
