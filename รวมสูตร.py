@@ -11,11 +11,11 @@ DEFAULT_CSV = "history_hanoi_.csv"
 DAY_CSV_MAP = {
     "Monday": "history_hanoi_mon.csv",
     "Tuesday": "history_hanoi_tue.csv",
-    "Wednesday": "history_hanoi_wed.csv", # ป้องกันกรณีมีไฟล์วันพุธเพิ่ม
+    "Wednesday": "history_hanoi_wed.csv",
     "Thursday": "history_hanoi_thu.csv",
     "Friday": "history_hanoi_fri.csv",
     "Saturday": "history_hanoi_sat.csv",
-    "Sunday": "history_hanoi_sun.csv"   # ป้องกันกรณีมีไฟล์วันอาทิตย์เพิ่ม
+    "Sunday": "history_hanoi_sun.csv"
 }
 
 MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 10
@@ -71,7 +71,6 @@ def parse_thai_date(x):
 
 def initialize_csvs():
     """สร้างไฟล์ CSV หลักและไฟล์แยกรายวันเริ่มต้น หากยังไม่มี"""
-.format
     all_files = [DEFAULT_CSV] + list(DAY_CSV_MAP.values())
     initial_data = [
         ["30/09/2569", "95242", "82585", "242", "85"],
@@ -85,11 +84,6 @@ def initialize_csvs():
             ]).to_csv(filepath, index=False, encoding="utf-8-sig")
 
 def load_history(target_day=None):
-    """
-    โหลดข้อมูลประวัติ:
-    - หากระบุ target_day จะพยายามโหลดจากไฟล์ประจำวันนั้นๆ (เช่น history_hanoi_mon.csv)
-    - หากไฟล์รายวันไม่มี หรือไม่ได้ระบุ จะ fallback ไปใช้ไฟล์หลัก history_hanoi_.csv
-    """
     initialize_csvs()
     
     filename = DEFAULT_CSV
@@ -112,16 +106,13 @@ def load_history(target_day=None):
     return df
 
 def save_history(df, target_day=None):
-    """บันทึกข้อมูลลงไฟล์หลักและไฟล์รายวันเฉพาะกิจ"""
     out = df.copy()
     for col in ["dt", "weekday_en"]:
         if col in out.columns:
             out = out.drop(columns=[col])
             
-    # บันทึกลงไฟล์หลักเสมอ
     out.to_csv(DEFAULT_CSV, index=False, encoding="utf-8-sig")
     
-    # หากระบุวัน ให้บันทึกลงไฟล์รายวันนั้นด้วย
     if target_day and target_day in DAY_CSV_MAP:
         out.to_csv(DAY_CSV_MAP[target_day], index=False, encoding="utf-8-sig")
 
@@ -167,10 +158,7 @@ def get_transformations(top_3_str, bottom_2_str="00"):
     }
 
 def daily_number_for_day(day, history=None):
-    """ผสานสถิติเลขประจำวัน: ดึงเลขประจำวันจากฐานข้อมูลรายวันหรือค่าตั้งต้น"""
     base = DEFAULT_DAILY_NUMBERS.get(day, "000000")
-    
-    # ดึงประวัติเฉพาะวันนั้นๆ มาช่วยคำนวณความถี่เลขประจำวันแบบ Dynamic
     day_history = load_history(target_day=day) if history is None else history
     
     if len(day_history) < MIN_HISTORY_FOR_DYNAMIC_WEIGHT:
@@ -379,7 +367,7 @@ def generate_prediction(df, next_day):
 # --- STREAMLIT UI ---
 initialize_csvs()
 st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0 (Multi-File Daily Edition)")
-st.markdown("ระบบวิเคราะห์หวยฮานอย ดึงข้อมูลแยกรายวันตามไฟล์ CSV (`history_hanoi_mon.csv`, `history_hanoi_thu.csv` ฯลฯ) พร้อมระบบเลขประจำวัน")
+st.markdown("ระบบวิเคราะห์หวยฮานอย ดึงข้อมูลแยกรายวันตามไฟล์ CSV และระบบเลขประจำวัน")
 
 menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้งาน", [
     "1. ทำนายผลล่วงหน้า (Forward Prediction)",
@@ -404,7 +392,6 @@ if "1." in menu:
     selected_day_th = st.selectbox("เลือกวันสำหรับงวดถัดไป", list(day_th_map.values()))
     next_day = [k for k, v in day_th_map.items() if v == selected_day_th][0]
 
-    # โหลดข้อมูลเฉพาะของวันนั้นๆ เพื่อให้ AI แม่นยำตามสถิติรายวัน
     df_day = load_history(target_day=next_day).sort_values("dt", ascending=False).reset_index(drop=True)
 
     if df_day.empty:
@@ -468,7 +455,6 @@ elif "2." in menu:
                 raw["dt"] = raw["date"].apply(parse_thai_date)
                 raw = raw.sort_values("dt", ascending=False)
                 
-                # บันทึกทั้งไฟล์หลักและไฟล์รายวัน (เช่น history_hanoi_mon.csv)
                 save_history(raw, target_day=target_day_en)
                 st.success(f"✅ บันทึกผลรางวัลลงในไฟล์ประจำ ({target_day_th}) สำเร็จเรียบร้อย!")
 
@@ -511,4 +497,4 @@ elif "5." in menu:
             "จำนวนงวดในฐานข้อมูล": len(df_d)
         })
     st.dataframe(pd.DataFrame(daily_data), use_container_width=True)
-    st.info("💡 ระบบจะดึงไฟล์แยกรายวัน (เช่น `history_hanoi_mon.csv` สำหรับวันจันทร์) มาคำนวณหาความถี่เลขเด่นประจำวันโดยอัตโนมัติ")
+    st.info("💡 ระบบจะดึงไฟล์แยกรายวันมาคำนวณหาความถี่เลขเด่นประจำวันโดยอัตโนมัติ")
