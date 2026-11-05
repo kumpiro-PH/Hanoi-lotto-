@@ -6,19 +6,8 @@ from collections import Counter, defaultdict
 
 st.set_page_config(page_title="HANOI AI PROFESSIONAL v2.0", layout="wide")
 
-# กำหนดชื่อไฟล์ CSV แยกตามรายวัน
-DEFAULT_CSV = "history_hanoi_.csv"
-DAY_CSV_MAP = {
-    "Monday": "history_hanoi_mon.csv",
-    "Tuesday": "history_hanoi_tue.csv",
-    "Wednesday": "history_hanoi_wed.csv",
-    "Thursday": "history_hanoi_thu.csv",
-    "Friday": "history_hanoi_fri.csv",
-    "Saturday": "history_hanoi_sat.csv",
-    "Sunday": "history_hanoi_sun.csv"
-}
-
-MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 10
+CSV_FILE = "history_hanoi.csv"
+MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 5
 RECENT_WINDOW = 30
 
 DEFAULT_DAILY_NUMBERS = {
@@ -69,52 +58,38 @@ def parse_thai_date(x):
     except Exception:
         return pd.NaT
 
-def initialize_csvs():
-    """สร้างไฟล์ CSV หลักและไฟล์แยกรายวันเริ่มต้น หากยังไม่มี"""
-    all_files = [DEFAULT_CSV] + list(DAY_CSV_MAP.values())
-    initial_data = [
-        ["30/09/2569", "95242", "82585", "242", "85"],
-        ["29/09/2569", "05651", "08389", "651", "89"],
-        ["28/09/2569", "77115", "86908", "115", "08"],
-    ]
-    for filepath in all_files:
-        if not os.path.exists(filepath):
-            pd.DataFrame(initial_data, columns=[
-                "date", "special", "first_prize", "top_3", "bottom_2"
-            ]).to_csv(filepath, index=False, encoding="utf-8-sig")
+def initialize_csv():
+    if not os.path.exists(CSV_FILE):
+        initial_data = [
+            ["05/11/2569", "24502", "42500", "502", "00"],
+            ["04/11/2569", "53046", "3675", "46", "75"],
+            ["03/11/2569", "74446", "97971", "446", "71"],
+        ]
+        pd.DataFrame(initial_data, columns=[
+            "date", "special", "first_prize", "top_3", "bottom_2"
+        ]).to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
 
-def load_history(target_day=None):
-    initialize_csvs()
-    
-    filename = DEFAULT_CSV
-    if target_day and target_day in DAY_CSV_MAP:
-        candidate = DAY_CSV_MAP[target_day]
-        if os.path.exists(candidate):
-            filename = candidate
-
-    df = pd.read_csv(filename, dtype=str).fillna("")
+def load_history():
+    if not os.path.exists(CSV_FILE):
+        initialize_csv()
+    df = pd.read_csv(CSV_FILE, dtype=str).fillna("")
     required = ["date", "special", "first_prize", "top_3", "bottom_2"]
     for col in required:
         if col not in df.columns:
             df[col] = ""
-            
     df["dt"] = df["date"].apply(parse_thai_date)
     df = df.dropna(subset=["dt"]).copy()
     df["top_3"] = df["top_3"].apply(lambda x: zfill_num(x, 3))
     df["bottom_2"] = df["bottom_2"].apply(lambda x: zfill_num(x, 2))
     df["weekday_en"] = df["dt"].dt.day_name()
-    return df
+    return df.sort_values("dt", ascending=False).reset_index(drop=True)
 
-def save_history(df, target_day=None):
+def save_history(df):
     out = df.copy()
     for col in ["dt", "weekday_en"]:
         if col in out.columns:
             out = out.drop(columns=[col])
-            
-    out.to_csv(DEFAULT_CSV, index=False, encoding="utf-8-sig")
-    
-    if target_day and target_day in DAY_CSV_MAP:
-        out.to_csv(DAY_CSV_MAP[target_day], index=False, encoding="utf-8-sig")
+    out.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
 
 def get_transformations(top_3_str, bottom_2_str="00"):
     t3 = zfill_num(top_3_str, 3)
@@ -159,17 +134,13 @@ def get_transformations(top_3_str, bottom_2_str="00"):
 
 def daily_number_for_day(day, history=None):
     base = DEFAULT_DAILY_NUMBERS.get(day, "000000")
-    day_history = load_history(target_day=day) if history is None else history
-    
-    if len(day_history) < MIN_HISTORY_FOR_DYNAMIC_WEIGHT:
+    if history is None or len(history) < MIN_HISTORY_FOR_DYNAMIC_WEIGHT:
         return base
-        
-    recent = day_history.tail(min(RECENT_WINDOW, len(day_history)))
+    recent = history.tail(min(RECENT_WINDOW, len(history)))
     freq = Counter()
     for _, row in recent.iterrows():
         freq.update(str(row["top_3"]))
         freq.update(str(row["bottom_2"]))
-        
     score = {str(i): float(freq[str(i)]) for i in range(10)}
     for d in base:
         score[d] += 1.5
@@ -304,7 +275,7 @@ def dynamic_weights(df):
 def digit_scores(df, next_day):
     if df.empty:
         return {str(i): 0.0 for i in range(10)}, {}, "000000"
-    latest = df.iloc[-1]
+    latest = df.iloc[0] # ใช้แถวแรกสุดเพราะถูก sort ไว้แบบ descending (ล่าสุดอยู่บนสุด)
     candidates, daily, trans = formula_candidates(latest["top_3"], latest["bottom_2"], next_day, df)
     weights = dynamic_weights(df)
     scores = {str(i): 0.0 for i in range(10)}
@@ -324,7 +295,7 @@ def digit_scores(df, next_day):
 def generate_prediction(df, next_day):
     if df.empty:
         return None
-    latest = df.iloc[-1]
+    latest = df.iloc[0]
     scores, weights, daily = digit_scores(df, next_day)
     ordered = sorted(scores, key=lambda d: (-scores[d], d))
     den = ordered[0]
@@ -365,17 +336,19 @@ def generate_prediction(df, next_day):
     }
 
 # --- STREAMLIT UI ---
-initialize_csvs()
-st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0 (Multi-File Daily Edition)")
-st.markdown("ระบบวิเคราะห์หวยฮานอย ดึงข้อมูลแยกรายวันตามไฟล์ CSV และระบบเลขประจำวัน")
+initialize_csv()
+st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
+st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ดึงข้อมูลฐานล่าสุดจาก `history_hanoi.csv` อัตโนมัติ")
 
 menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้งาน", [
     "1. ทำนายผลล่วงหน้า (Forward Prediction)",
-    "2. อัปเดตผลรางวัล (บันทึกแยกตามวัน)",
-    "3. ตรวจสอบประวัติรายวัน (History)",
-    "4. จัดอันดับสูตร / Backtest ตามวัน",
-    "5. เลขประจำวัน (Daily Numbers & Stats)"
+    "2. อัปเดตผลรางวัล",
+    "3. ตรวจสอบประวัติ (History)",
+    "4. จัดอันดับสูตร / Backtest",
+    "5. เลขประจำวัน (Daily Numbers)"
 ])
+
+df = load_history()
 
 day_th_map = {
     "Monday": "วันจันทร์",
@@ -392,19 +365,13 @@ if "1." in menu:
     selected_day_th = st.selectbox("เลือกวันสำหรับงวดถัดไป", list(day_th_map.values()))
     next_day = [k for k, v in day_th_map.items() if v == selected_day_th][0]
 
-    df_day = load_history(target_day=next_day).sort_values("dt", ascending=False).reset_index(drop=True)
-
-    if df_day.empty:
-        st.warning(f"⚠️ ยังไม่มีข้อมูลประวัติสำหรับ {selected_day_th} ระบบจะใช้ไฟล์หลักแทน")
-        df_day = load_history().sort_values("dt", ascending=False).reset_index(drop=True)
-
-    if df_day.empty:
+    if df.empty:
         st.warning("⚠️ ยังไม่มีข้อมูลในระบบ กรุณาเพิ่มข้อมูลงวดก่อนหน้าก่อน")
     else:
-        p = generate_prediction(df_day, next_day)
-        latest = p["latest"]
+        latest = df.iloc[0]
+        p = generate_prediction(df, next_day)
 
-        st.info(f"📌 ข้อมูลฐานล่าสุดของ ({selected_day_th}): งวดวันที่ **{latest['date']}** | 3 ตัวบน: **{latest['top_3']}** | 2 ตัวล่าง: **{latest['bottom_2']}**")
+        st.info(f"📌 ข้อมูลฐานล่าสุดจาก CSV: งวดวันที่ **{latest['date']}** | 3 ตัวบน: **{latest['top_3']}** | 2 ตัวล่าง: **{latest['bottom_2']}**")
         st.write(f"📅 เลขประจำวัน (Daily 6-Digit) สำหรับ {selected_day_th}: `{p['daily']}`")
 
         col1, col2, col3 = st.columns(3)
@@ -422,23 +389,19 @@ if "1." in menu:
         st.markdown(f"**หาม:** `{', '.join(p['sandwiches'])}`")
 
 elif "2." in menu:
-    st.header("📝 อัปเดตผลรางวัลหวยฮานอย (แยกตามไฟล์รายวัน)")
-    target_day_th = st.selectbox("เลือกวันของผลรางวัลที่ต้องการบันทึก", list(day_th_map.values()))
-    target_day_en = [k for k, v in day_th_map.items() if v == target_day_th][0]
-
+    st.header("📝 อัปเดตผลรางวัลหวยฮานอย")
     with st.form("update_form"):
-        date_str = st.text_input("ใส่วันที่ (DD/MM/YYYY พ.ศ., เช่น 06/10/2569)")
+        date_str = st.text_input("ใส่วันที่ (DD/MM/YYYY พ.ศ., เช่น 06/11/2569)")
         special = st.text_input("รางวัลพิเศษ (5 หลัก)")
         first_prize = st.text_input("รางวัลที่ 1 (5 หลัก)")
         top_3 = st.text_input("เลข 3 ตัวบน (3 หลัก)")
         bottom_2 = st.text_input("เลข 2 ตัวล่าง (2 หลัก)")
-        submitted = st.form_submit_button("💾 บันทึกผลรางวัลลงไฟล์ประจำวัน")
+        submitted = st.form_submit_button("💾 บันทึกผลรางวัล")
 
         if submitted:
             if not date_str or not top_3 or not bottom_2:
                 st.error("⚠️ กรุณากรอกวันที่ 3 ตัวบน และ 2 ตัวล่างให้ครบถ้วน")
             else:
-                df_current = load_history(target_day=target_day_en)
                 new_row = pd.DataFrame([{
                     "date": date_str,
                     "special": special,
@@ -449,52 +412,33 @@ elif "2." in menu:
                 new_row["dt"] = new_row["date"].apply(parse_thai_date)
                 new_row["weekday_en"] = new_row["dt"].dt.day_name()
 
-                raw = df_current.drop(columns=["dt", "weekday_en"], errors="ignore")
+                raw = df.drop(columns=["dt", "weekday_en"], errors="ignore")
                 raw = pd.concat([new_row.drop(columns=["dt", "weekday_en"]), raw], ignore_index=True)
                 raw = raw.drop_duplicates(subset=["date"], keep="first")
                 raw["dt"] = raw["date"].apply(parse_thai_date)
                 raw = raw.sort_values("dt", ascending=False)
-                
-                save_history(raw, target_day=target_day_en)
-                st.success(f"✅ บันทึกผลรางวัลลงในไฟล์ประจำ ({target_day_th}) สำเร็จเรียบร้อย!")
+                save_history(raw)
+                st.success("✅ บันทึกผลรางวัลใหม่สำเร็จ! ข้อมูลฐานถูกอัปเดตเรียบร้อย")
 
 elif "3." in menu:
-    st.header("📜 ตรวจสอบประวัติผลรางวัลรายวัน")
-    selected_day_th = st.selectbox("เลือกวันที่ต้องการดูประวัติ", ["ทั้งหมด (ไฟล์หลัก)"] + list(day_th_map.values()))
-    
-    if selected_day_th == "ทั้งหมด (ไฟล์หลัก)":
-        df_view = load_history().sort_values("dt", ascending=False)
-    else:
-        en_day = [k for k, v in day_th_map.items() if v == selected_day_th][0]
-        df_view = load_history(target_day=en_day).sort_values("dt", ascending=False)
-
-    st.write(f"จำนวนข้อมูล: **{len(df_view)}** งวด")
+    st.header("📜 ประวัติผลรางวัลทั้งหมด (History)")
+    st.write(f"จำนวนข้อมูลทั้งหมด: **{len(df)}** งวด")
     cols = ["date", "special", "first_prize", "top_3", "bottom_2", "weekday_en"]
-    st.dataframe(df_view[cols], use_container_width=True)
+    st.dataframe(df[cols], use_container_width=True)
 
 elif "4." in menu:
-    st.header("📈 การจัดอันดับสูตร / Backtest รายวัน")
-    selected_day_th = st.selectbox("เลือกวันสำหรับทดสอบสูตร", list(day_th_map.values()))
-    en_day = [k for k, v in day_th_map.items() if v == selected_day_th][0]
-    
-    df_sorted = load_history(target_day=en_day).sort_values("dt").reset_index(drop=True)
+    st.header("📈 การจัดอันดับสูตร / Backtest")
+    df_sorted = df.sort_values("dt").reset_index(drop=True)
     if len(df_sorted) < 2:
-        st.warning("⚠️ ข้อมูลในไฟล์รายวันนี้ยังไม่เพียงพอ (ต้องมีอย่างน้อย 2 งวด)")
+        st.warning("⚠️ ข้อมูลไม่เพียงพอ ต้องมีอย่างน้อย 2 งวด")
     else:
         ranking = formula_ranking(df_sorted)
         st.dataframe(ranking, use_container_width=True)
 
 elif "5." in menu:
-    st.header("📅 เลขประจำวัน (Daily Numbers & Dynamic Stats)")
+    st.header("📅 เลขประจำวัน (Daily Numbers)")
+    df_sorted = df.sort_values("dt").reset_index(drop=True)
     daily_data = []
     for en, th in day_th_map.items():
-        df_d = load_history(target_day=en)
-        computed_daily = daily_number_for_day(en, df_d)
-        daily_data.append({
-            "วัน": th, 
-            "ไฟล์ CSV ประจำวัน": DAY_CSV_MAP.get(en, "history_hanoi_.csv"),
-            "เลขประจำวัน (Dynamic 6-Digit)": computed_daily,
-            "จำนวนงวดในฐานข้อมูล": len(df_d)
-        })
+        daily_data.append({"วัน": th, "Daily 6-Digit": daily_number_for_day(en, df_sorted)})
     st.dataframe(pd.DataFrame(daily_data), use_container_width=True)
-    st.info("💡 ระบบจะดึงไฟล์แยกรายวันมาคำนวณหาความถี่เลขเด่นประจำวันโดยอัตโนมัติ")
