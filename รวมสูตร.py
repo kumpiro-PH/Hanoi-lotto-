@@ -9,7 +9,6 @@ from io import StringIO
 
 st.set_page_config(page_title="HANOI AI PROFESSIONAL v2.0", layout="wide")
 
-CSV_FILE = "history_hanoi.csv"
 MIN_HISTORY_FOR_DYNAMIC_WEIGHT = 5
 RECENT_WINDOW = 30
 
@@ -71,20 +70,37 @@ def parse_date_for_sort(date_str):
         pass
     return datetime(1900, 1, 1)
 
+def get_csv_filename_for_date(date_str=None):
+    """เลือกชื่อไฟล์ CSV ตามวันในสัปดาห์ เช่น history_hanoi_mon.csv"""
+    try:
+        if date_str:
+            dt = parse_thai_date(date_str)
+        else:
+            dt = datetime.now()
+        
+        if pd.isna(dt):
+            dt = datetime.now()
+            
+        day_lower = dt.strftime("%a").lower() # mon, tue, wed, thu, fri, sat, sun
+        return f"history_hanoi_{day_lower}.csv"
+    except Exception:
+        return "history_hanoi_mon.csv"
+
 # ==========================================
-# GITHUB API SYNC FUNCTIONS
+# GITHUB API SYNC FUNCTIONS (DYNAMIC FILE)
 # ==========================================
-def load_csv_data_from_github():
-    """อ่าน CSV จาก GitHub API (พร้อม fallback มาอ่านในเครื่อง)"""
+def load_csv_data_from_github(target_date=None):
+    """อ่าน CSV จาก GitHub API ตามไฟล์ประจำวัน (พร้อม fallback มาอ่านในเครื่อง)"""
+    csv_file = get_csv_filename_for_date(target_date)
     github_token = st.secrets.get("GITHUB_TOKEN")
     repo_name = st.secrets.get("GITHUB_REPO")
     
-    if github_token and repo_name and CSV_FILE:
+    if github_token and repo_name and csv_file:
         headers = {
             "Authorization": f"Bearer {github_token}",
             "Accept": "application/vnd.github+json"
         }
-        file_url = f"https://api.github.com/repos/{repo_name}/contents/{CSV_FILE}"
+        file_url = f"https://api.github.com/repos/{repo_name}/contents/{csv_file}"
         try:
             res = requests.get(file_url, headers=headers)
             if res.status_code == 200:
@@ -96,22 +112,23 @@ def load_csv_data_from_github():
             pass
             
     # Fallback อ่านในเครื่อง
-    if os.path.exists(CSV_FILE):
+    if os.path.exists(csv_file):
         try:
-            return pd.read_csv(CSV_FILE, dtype=str).fillna("")
+            return pd.read_csv(csv_file, dtype=str).fillna("")
         except Exception:
             pass
             
     # ค่าเริ่มต้นถ้ายังไม่มีไฟล์
     initial_data = [
         ["05/11/2569", "24502", "42500", "502", "00"],
-        ["04/11/2569", "53046", "3675", "46", "75"],
-        ["03/11/2569", "74446", "97971", "446", "71"],
     ]
     return pd.DataFrame(initial_data, columns=["date", "special", "first_prize", "top_3", "bottom_2"])
 
 def save_history_to_github(new_row_df):
-    """บันทึกและซิงก์ข้อมูล CSV ตรงขึ้น GitHub ผ่าน API อัตโนมัติ"""
+    """บันทึกและซิงก์ข้อมูล CSV ลงไฟล์ประจำวันบน GitHub ผ่าน API อัตโนมัติ"""
+    new_date = new_row_df.iloc[0]["date"]
+    csv_file = get_csv_filename_for_date(new_date)
+    
     github_token = st.secrets.get("GITHUB_TOKEN")
     repo_name = st.secrets.get("GITHUB_REPO")
     branch = st.secrets.get("GITHUB_BRANCH", "main")
@@ -124,7 +141,7 @@ def save_history_to_github(new_row_df):
         "Authorization": f"Bearer {github_token}",
         "Accept": "application/vnd.github+json"
     }
-    file_url = f"https://api.github.com/repos/{repo_name}/contents/{CSV_FILE}"
+    file_url = f"https://api.github.com/repos/{repo_name}/contents/{csv_file}"
     
     # 1. ดึงไฟล์เดิมจาก GitHub เพื่อเอา SHA
     res = requests.get(file_url, headers=headers)
@@ -139,7 +156,6 @@ def save_history_to_github(new_row_df):
         existing_df.columns = existing_df.columns.str.strip()
         
     # 2. รวมข้อมูลใหม่กับข้อมูลเดิม (กรองวันที่ซ้ำออก)
-    new_date = new_row_df.iloc[0]["date"]
     if not existing_df.empty and "date" in existing_df.columns:
         existing_df = existing_df[existing_df["date"] != new_date]
         
@@ -157,7 +173,7 @@ def save_history_to_github(new_row_df):
     
     # 5. ส่งคำขอ PUT ไปที่ GitHub API
     payload = {
-        "message": f"Update {CSV_FILE} for {new_date} via Streamlit App",
+        "message": f"Update {csv_file} for {new_date} via Streamlit App",
         "content": encoded_content,
         "branch": branch
     }
@@ -171,8 +187,8 @@ def save_history_to_github(new_row_df):
         st.error(f"❌ GitHub API Error ({put_res.status_code}): {put_res.text}")
         return False
 
-def load_history():
-    df = load_csv_data_from_github()
+def load_history(target_date=None):
+    df = load_csv_data_from_github(target_date)
     required = ["date", "special", "first_prize", "top_3", "bottom_2"]
     for col in required:
         if col not in df.columns:
@@ -418,7 +434,7 @@ def generate_prediction(df, next_day):
 
 # --- STREAMLIT UI ---
 st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
-st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub อัตโนมัติผ่าน GitHub API")
+st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันอัตโนมัติ")
 
 menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้งาน", [
     "1. ทำนายผลล่วงหน้า (Forward Prediction)",
@@ -427,8 +443,6 @@ menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้�
     "4. จัดอันดับสูตร / Backtest",
     "5. เลขประจำวัน (Daily Numbers)"
 ])
-
-df = load_history()
 
 day_th_map = {
     "Monday": "วันจันทร์",
@@ -445,8 +459,21 @@ if "1." in menu:
     selected_day_th = st.selectbox("เลือกวันสำหรับงวดถัดไป", list(day_th_map.values()))
     next_day = [k for k, v in day_th_map.items() if v == selected_day_th][0]
 
+    # โหลดข้อมูลตามวันของสัปดาห์ที่เลือก
+    # ตัวอย่าง: ถ้าเลือกวันจันทร์ ระบบจะดึงไฟล์ history_hanoi_mon.csv มาวิเคราะห์
+    target_dummy_date_map = {
+        "Monday": "03/11/2569",    # สมมติฐานวันจันทร์
+        "Tuesday": "04/11/2569",   # สมมติฐานวันอังคาร
+        "Wednesday": "05/11/2569", # สมมติฐานวันพุธ
+        "Thursday": "06/11/2569",
+        "Friday": "07/11/2569",
+        "Saturday": "08/11/2569",
+        "Sunday": "09/11/2569"
+    }
+    df = load_history(target_dummy_date_map.get(next_day))
+
     if df.empty:
-        st.warning("⚠️ ยังไม่มีข้อมูลในระบบ กรุณาเพิ่มข้อมูลงวดก่อนหน้าก่อน")
+        st.warning(f"⚠️ ยังไม่มีข้อมูลในไฟล์ประจำ {selected_day_th} กรุณาเพิ่มข้อมูลงวดก่อนหน้าก่อน")
     else:
         latest = df.iloc[0]
         p = generate_prediction(df, next_day)
@@ -469,7 +496,7 @@ if "1." in menu:
         st.markdown(f"**หาม:** `{', '.join(p['sandwiches'])}`")
 
 elif "2." in menu:
-    st.header("📝 อัปเดตผลรางวัลหวยฮานอย (ซิงก์ตรงขึ้น GitHub)")
+    st.header("📝 อัปเดตผลรางวัลหวยฮานอย (ซิงก์แยกไฟล์รายวันขึ้น GitHub)")
     with st.form("update_form"):
         date_str = st.text_input("ใส่วันที่ (DD/MM/YYYY พ.ศ., เช่น 06/11/2569)")
         special = st.text_input("รางวัลพิเศษ (5 หลัก)")
@@ -492,22 +519,41 @@ elif "2." in menu:
                 
                 success = save_history_to_github(new_row)
                 if success:
-                    st.success("✅ บันทึกและซิงก์ข้อมูลลง GitHub (`history_hanoi.csv`) สำเร็จเรียบร้อยแล้ว!")
+                    target_file = get_csv_filename_for_date(date_str)
+                    st.success(f"✅ บันทึกและซิงก์ข้อมูลลงไฟล์ `{target_file}` บน GitHub สำเร็จเรียบร้อยแล้ว!")
                     st.rerun()
                 else:
                     st.error("❌ เกิดข้อผิดพลาดในการเชื่อมต่อกับ GitHub API กรุณาตรวจสอบ GITHUB_TOKEN และ Secrets อีกครั้ง")
 
 elif "3." in menu:
     st.header("📜 ประวัติผลรางวัลทั้งหมด (History)")
-    st.write(f"จำนวนข้อมูลทั้งหมด: **{len(df)}** งวด")
+    selected_day_th_hist = st.selectbox("เลือกดูประวัติของวันในสัปดาห์", list(day_th_map.values()))
+    next_day_hist = [k for k, v in day_th_map.items() if v == selected_day_th_hist][0]
+    
+    target_dummy_date_map = {
+        "Monday": "03/11/2569", "Tuesday": "04/11/2569", "Wednesday": "05/11/2569",
+        "Thursday": "06/11/2569", "Friday": "07/11/2569", "Saturday": "08/11/2569", "Sunday": "09/11/2569"
+    }
+    df_hist = load_history(target_dummy_date_map.get(next_day_hist))
+    
+    st.write(f"จำนวนข้อมูลในไฟล์ของ **{selected_day_th_hist}** ทั้งหมด: **{len(df_hist)}** งวด")
     cols = ["date", "special", "first_prize", "top_3", "bottom_2", "weekday_en"]
-    st.dataframe(df[cols], use_container_width=True, hide_index=True)
+    st.dataframe(df_hist[cols], use_container_width=True, hide_index=True)
 
 elif "4." in menu:
     st.header("📈 การจัดอันดับสูตร / Backtest")
-    df_sorted = df.sort_values("dt").reset_index(drop=True)
+    selected_day_th_bt = st.selectbox("เลือกวันสำหรับรัน Backtest", list(day_th_map.values()), key="bt_day")
+    next_day_bt = [k for k, v in day_th_map.items() if v == selected_day_th_bt][0]
+    
+    target_dummy_date_map = {
+        "Monday": "03/11/2569", "Tuesday": "04/11/2569", "Wednesday": "05/11/2569",
+        "Thursday": "06/11/2569", "Friday": "07/11/2569", "Saturday": "08/11/2569", "Sunday": "09/11/2569"
+    }
+    df_bt_data = load_history(target_dummy_date_map.get(next_day_bt))
+    df_sorted = df_bt_data.sort_values("dt").reset_index(drop=True)
+    
     if len(df_sorted) < 2:
-        st.warning("⚠️ ข้อมูลไม่เพียงพอ ต้องมีอย่างน้อย 2 งวด")
+        st.warning("⚠️ ข้อมูลในไฟล์นี้ไม่เพียงพอ ต้องมีอย่างน้อย 2 งวด")
     else:
         ranking = formula_ranking(df_sorted)
         st.dataframe(ranking, use_container_width=True)
