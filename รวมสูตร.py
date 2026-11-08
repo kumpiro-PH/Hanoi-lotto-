@@ -139,7 +139,6 @@ def save_history_to_github(day_en, new_row_df):
     }
     file_url = f"https://api.github.com/repos/{repo_name}/contents/{csv_file}"
     
-    # 1. ดึงไฟล์เดิมจาก GitHub เพื่อเอา SHA (ถ้าไม่มีจะเป็น 404 ซึ่งจะข้ามไปสร้างใหม่)
     res = requests.get(file_url, headers=headers)
     file_sha = None
     existing_df = pd.DataFrame(columns=["date", "special", "first_prize", "top_3", "bottom_2"])
@@ -425,6 +424,20 @@ def generate_prediction(df, next_day):
         "weights": weights,
     }
 
+# ==========================================
+# 🔍 ฟังก์ชันเสริมวิเคราะห์ผลรางวัลล่าสุด
+# ==========================================
+def analyze_latest_result(special_str, top3_str, bottom2_str):
+    sp = str(special_str).zfill(5)
+    t3 = str(top3_str).zfill(3)
+    b2 = str(bottom2_str).zfill(2)
+    
+    all_digits = list(sp + t3 + b2)
+    digit_counts = Counter(all_digits)
+    most_common_digits = [item[0] for item in digit_counts.most_common(3)]
+    return most_common_digits
+
+
 # --- STREAMLIT UI ---
 st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
 st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันตามชื่อวัน")
@@ -466,7 +479,12 @@ if "1." in menu:
         latest = df.iloc[0]
         p = generate_prediction(df, next_day)
 
-        st.info(f"📌 ข้อมูลฐานล่าสุด: งวดวันที่ **{latest['date']}** | 3 ตัวบน: **{latest['top_3']}** | 2 ตัวล่าง: **{latest['bottom_2']}**")
+        st.info(f"📌 ข้อมูลฐานล่าสุด: งวดวันที่ **{latest['date']}** | รางวัลพิเศษ: **{latest['special']}** | 3 ตัวบน: **{latest['top_3']}** | 2 ตัวล่าง: **{latest['bottom_2']}**")
+        
+        # แสดงผลวิเคราะห์เสริมจากผลรางวัลงวดล่าสุด
+        top_draw_digits = analyze_latest_result(latest['special'], latest['top_3'], latest['bottom_2'])
+        st.write(f"🔍 **วิเคราะห์เจาะลึกจากงวดล่าสุด:** เลขที่ออกซ้ำบ่อยสุดคือ `{top_draw_digits[0]}` (รอง: `{top_draw_digits[1]}` - `{top_draw_digits[2]}`)")
+        
         st.write(f"📅 เลขประจำวัน (Daily 6-Digit) สำหรับ {selected_day_th}: `{p['daily']}`")
 
         col1, col2, col3 = st.columns(3)
