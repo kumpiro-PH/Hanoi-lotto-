@@ -1,4 +1,3 @@
-# app.py - HANOI AI PROFESSIONAL v2.0 (GitHub API Sync & Date Sorted)
 import os
 import streamlit as st
 import pandas as pd
