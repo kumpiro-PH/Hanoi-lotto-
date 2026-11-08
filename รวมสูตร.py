@@ -87,11 +87,11 @@ def get_csv_filename_for_date(date_str=None):
         return "history_hanoi_mon.csv"
 
 # ==========================================
-# GITHUB API SYNC FUNCTIONS (WITH ST.CACHE_DATA)
+# GITHUB API SYNC FUNCTIONS (ROBUST & CACHED)
 # ==========================================
 @st.cache_data(ttl=600, show_spinner="กำลังโหลดข้อมูลจาก GitHub...")
 def load_csv_data_from_github(target_date=None):
-    """อ่าน CSV จาก GitHub API ตามไฟล์ประจำวัน (พร้อมแคช 10 นาทีเพื่อลด Rate Limit)"""
+    """อ่าน CSV จาก GitHub API ตามไฟล์ประจำวัน (พร้อมแคช 10 นาที)"""
     csv_file = get_csv_filename_for_date(target_date)
     github_token = st.secrets.get("GITHUB_TOKEN")
     repo_name = st.secrets.get("GITHUB_REPO")
@@ -106,8 +106,10 @@ def load_csv_data_from_github(target_date=None):
             res = requests.get(file_url, headers=headers)
             if res.status_code == 200:
                 file_data = res.json()
-                content_decoded = base64.b64decode(file_data["content"]).decode("utf-8")
+                content_decoded = base64.b64decode(file_data["content"]).decode("utf-8-sig")
                 df = pd.read_csv(StringIO(content_decoded), dtype=str).fillna("")
+                # ทำความสะอาดชื่อคอลัมน์ ป้องกันปัญหาอักขระพิเศษหรือ | ติดมา
+                df.columns = df.columns.str.strip().str.lstrip('|')
                 return df
         except Exception:
             pass
@@ -115,7 +117,9 @@ def load_csv_data_from_github(target_date=None):
     # Fallback อ่านในเครื่อง
     if os.path.exists(csv_file):
         try:
-            return pd.read_csv(csv_file, dtype=str).fillna("")
+            df = pd.read_csv(csv_file, dtype=str, encoding="utf-8-sig").fillna("")
+            df.columns = df.columns.str.strip().str.lstrip('|')
+            return df
         except Exception:
             pass
             
@@ -152,9 +156,9 @@ def save_history_to_github(new_row_df):
     if res.status_code == 200:
         file_data = res.json()
         file_sha = file_data["sha"]
-        content_decoded = base64.b64decode(file_data["content"]).decode("utf-8")
+        content_decoded = base64.b64decode(file_data["content"]).decode("utf-8-sig")
         existing_df = pd.read_csv(StringIO(content_decoded), dtype=str).fillna("")
-        existing_df.columns = existing_df.columns.str.strip()
+        existing_df.columns = existing_df.columns.str.strip().str.lstrip('|')
         
     # 2. รวมข้อมูลใหม่กับข้อมูลเดิม (กรองวันที่ซ้ำออก)
     if not existing_df.empty and "date" in existing_df.columns:
@@ -183,7 +187,6 @@ def save_history_to_github(new_row_df):
         
     put_res = requests.put(file_url, headers=headers, json=payload)
     if put_res.status_code in [200, 201]:
-        # เคลียร์ Cache ทันทีเพื่อให้โหลดข้อมูลใหม่รอบหน้าได้ทันที
         st.cache_data.clear()
         return True
     else:
@@ -437,7 +440,7 @@ def generate_prediction(df, next_day):
 
 # --- STREAMLIT UI ---
 st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
-st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันอัตโนมัติ (พร้อมระบบ Cache)")
+st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันอัตโนมัติ")
 
 menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้งาน", [
     "1. ทำนายผลล่วงหน้า (Forward Prediction)",
