@@ -83,7 +83,7 @@ def get_csv_filename_for_day(day_en):
     return DAY_CSV_FILES.get(day_en, "history_hanoi_mon.csv")
 
 # ==========================================
-# GITHUB API SYNC FUNCTIONS (CACHED)
+# GITHUB API SYNC FUNCTIONS (AUTO CREATE IF NOT EXISTS)
 # ==========================================
 @st.cache_data(ttl=600, show_spinner="กำลังโหลดข้อมูลจาก GitHub...")
 def load_csv_data_from_github(day_en):
@@ -139,6 +139,7 @@ def save_history_to_github(day_en, new_row_df):
     }
     file_url = f"https://api.github.com/repos/{repo_name}/contents/{csv_file}"
     
+    # 1. ดึงไฟล์เดิมจาก GitHub เพื่อเอา SHA (ถ้าไม่มีจะเป็น 404 ซึ่งจะข้ามไปสร้างใหม่)
     res = requests.get(file_url, headers=headers)
     file_sha = None
     existing_df = pd.DataFrame(columns=["date", "special", "first_prize", "top_3", "bottom_2"])
@@ -164,7 +165,7 @@ def save_history_to_github(day_en, new_row_df):
     encoded_content = base64.b64encode(csv_string.encode("utf-8")).decode("utf-8")
     
     payload = {
-        "message": f"Update {csv_file} for {new_date} via Streamlit App",
+        "message": f"Create or Update {csv_file} for {new_date} via Streamlit App",
         "content": encoded_content,
         "branch": branch
     }
@@ -428,7 +429,6 @@ def generate_prediction(df, next_day):
 st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
 st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันตามชื่อวัน")
 
-# เพิ่มปุ่มเคลียร์แคชที่ Sidebar สำหรับดึงข้อมูลล่าสุดทันที
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 รีเฟรช / ดึงข้อมูลล่าสุด"):
     st.cache_data.clear()
