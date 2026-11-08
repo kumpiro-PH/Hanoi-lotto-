@@ -87,10 +87,11 @@ def get_csv_filename_for_date(date_str=None):
         return "history_hanoi_mon.csv"
 
 # ==========================================
-# GITHUB API SYNC FUNCTIONS (DYNAMIC FILE)
+# GITHUB API SYNC FUNCTIONS (WITH ST.CACHE_DATA)
 # ==========================================
+@st.cache_data(ttl=600, show_spinner="กำลังโหลดข้อมูลจาก GitHub...")
 def load_csv_data_from_github(target_date=None):
-    """อ่าน CSV จาก GitHub API ตามไฟล์ประจำวัน (พร้อม fallback มาอ่านในเครื่อง)"""
+    """อ่าน CSV จาก GitHub API ตามไฟล์ประจำวัน (พร้อมแคช 10 นาทีเพื่อลด Rate Limit)"""
     csv_file = get_csv_filename_for_date(target_date)
     github_token = st.secrets.get("GITHUB_TOKEN")
     repo_name = st.secrets.get("GITHUB_REPO")
@@ -125,7 +126,7 @@ def load_csv_data_from_github(target_date=None):
     return pd.DataFrame(initial_data, columns=["date", "special", "first_prize", "top_3", "bottom_2"])
 
 def save_history_to_github(new_row_df):
-    """บันทึกและซิงก์ข้อมูล CSV ลงไฟล์ประจำวันบน GitHub ผ่าน API อัตโนมัติ"""
+    """บันทึกและซิงก์ข้อมูล CSV ลงไฟล์ประจำวันบน GitHub พร้อมเคลียร์ Cache อัตโนมัติ"""
     new_date = new_row_df.iloc[0]["date"]
     csv_file = get_csv_filename_for_date(new_date)
     
@@ -182,6 +183,8 @@ def save_history_to_github(new_row_df):
         
     put_res = requests.put(file_url, headers=headers, json=payload)
     if put_res.status_code in [200, 201]:
+        # เคลียร์ Cache ทันทีเพื่อให้โหลดข้อมูลใหม่รอบหน้าได้ทันที
+        st.cache_data.clear()
         return True
     else:
         st.error(f"❌ GitHub API Error ({put_res.status_code}): {put_res.text}")
@@ -434,7 +437,7 @@ def generate_prediction(df, next_day):
 
 # --- STREAMLIT UI ---
 st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0")
-st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันอัตโนมัติ")
+st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันอัตโนมัติ (พร้อมระบบ Cache)")
 
 menu = st.sidebar.selectbox("📌 เลือกเมนูการใช้งาน", [
     "1. ทำนายผลล่วงหน้า (Forward Prediction)",
@@ -459,12 +462,10 @@ if "1." in menu:
     selected_day_th = st.selectbox("เลือกวันสำหรับงวดถัดไป", list(day_th_map.values()))
     next_day = [k for k, v in day_th_map.items() if v == selected_day_th][0]
 
-    # โหลดข้อมูลตามวันของสัปดาห์ที่เลือก
-    # ตัวอย่าง: ถ้าเลือกวันจันทร์ ระบบจะดึงไฟล์ history_hanoi_mon.csv มาวิเคราะห์
     target_dummy_date_map = {
-        "Monday": "03/11/2569",    # สมมติฐานวันจันทร์
-        "Tuesday": "04/11/2569",   # สมมติฐานวันอังคาร
-        "Wednesday": "05/11/2569", # สมมติฐานวันพุธ
+        "Monday": "03/11/2569",
+        "Tuesday": "04/11/2569",
+        "Wednesday": "05/11/2569",
         "Thursday": "06/11/2569",
         "Friday": "07/11/2569",
         "Saturday": "08/11/2569",
