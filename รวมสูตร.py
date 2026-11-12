@@ -25,7 +25,7 @@ DEFAULT_DAILY_NUMBERS = {
     "Tuesday": "986304",
     "Wednesday": "698741",
     "Thursday": "421590",
-    "Friday": "761438",
+    "Friday": "769825",
     "Saturday": "094572",
     "Sunday": "768304"
 }
