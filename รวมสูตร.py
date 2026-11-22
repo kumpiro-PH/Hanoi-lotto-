@@ -434,7 +434,7 @@ def analyze_latest_result(special_str, top3_str, bottom2_str):
     return most_common_digits
 
 # --- STREAMLIT UI ---
-st.title("🇻🇳 HANOI AI PROFESSIONAL v2.0 (Merged Ultimate)")
+st.title("🇻🇳 HANOI AI v2.0 (Merged Ultimate)")
 st.markdown("ระบบวิเคราะห์และทำนายผลหวยฮานอย ซิงก์ตรงขึ้น GitHub แยกไฟล์รายวันตามชื่อวัน")
 
 st.sidebar.markdown("---")
